@@ -127,6 +127,18 @@ namespace Singularity.Crash {
         public static async void fill_package_version(Report report) {
             if (report.app_version != "" || report.executable == "") return;
             string exe = report.executable;
+            if (Environment.find_program_in_path("xbps-query") != null) {
+                string? owned = yield Tools.run({ "xbps-query", "-o", exe }, 5);
+                int colon = owned != null ? owned.index_of(":") : -1;
+                if (colon > 0) {
+                    string pkgver = owned.substring(0, colon).strip();
+                    int dash = pkgver.last_index_of("-");
+                    if (dash > 0) {
+                        report.app_version = pkgver.substring(dash + 1);
+                        return;
+                    }
+                }
+            }
             if (Environment.find_program_in_path("rpm") != null) {
                 string? out_text = yield Tools.run({ "rpm", "-qf", "--qf", "%{VERSION}-%{RELEASE}", exe }, 5);
                 if (out_text != null && out_text.strip() != "" && !out_text.contains("not owned")) {
