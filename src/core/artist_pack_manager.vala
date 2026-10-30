@@ -32,12 +32,31 @@ namespace Singularity {
     public class ArtistPackManager : GLib.Object {
         private static ArtistPackManager? _instance = null;
 
-        // Never resolved via PATH: INSTALL_HELPER is what pkexec runs as root,
-        // so a PATH lookup would let ~/.local/bin shadow it and get elevated.
-        private const string INVENTORY_HELPER = "/usr/local/bin/singularity-artist-pack-inventory";
-        private const string INSTALL_HELPER = "/usr/local/bin/singularity-artist-pack-install";
+        // Never resolved via PATH: the install helper is what pkexec runs as
+        // root, so a PATH lookup would let ~/.local/bin shadow it and get
+        // elevated. Fixed list: /usr for distro packages, /opt/local and
+        // /usr/local for source deploys.
+        private const string[] HELPER_DIRS = { "/usr/bin", "/opt/local/bin", "/usr/local/bin" };
+        private const string INVENTORY_HELPER_NAME = "singularity-artist-pack-inventory";
+        private const string INSTALL_HELPER_NAME = "singularity-artist-pack-install";
         private const string INSTALL_POLICY = "/usr/share/polkit-1/actions/dev.sinty.desktop.artist-pack-install.policy";
         private const string[] PKEXEC_PATHS = { "/usr/bin/pkexec", "/bin/pkexec" };
+
+        private static string find_helper(string name) {
+            foreach (unowned string dir in HELPER_DIRS) {
+                string path = dir + "/" + name;
+                if (is_executable_file(path)) return path;
+            }
+            return HELPER_DIRS[HELPER_DIRS.length - 1] + "/" + name;
+        }
+
+        private static string inventory_helper() {
+            return find_helper(INVENTORY_HELPER_NAME);
+        }
+
+        private static string install_helper() {
+            return find_helper(INSTALL_HELPER_NAME);
+        }
 
         public static ArtistPackManager get_default() {
             if (_instance == null) _instance = new ArtistPackManager();
@@ -60,8 +79,8 @@ namespace Singularity {
 
         // Every piece of the contract, so an incomplete backend shows nothing.
         public bool is_available() {
-            return is_executable_file(INVENTORY_HELPER)
-                && is_executable_file(INSTALL_HELPER)
+            return is_executable_file(inventory_helper())
+                && is_executable_file(install_helper())
                 && FileUtils.test(INSTALL_POLICY, FileTest.IS_REGULAR)
                 && find_pkexec() != null;
         }
@@ -69,16 +88,16 @@ namespace Singularity {
         // Absent backend yields an empty list, not an error.
         public async Gee.ArrayList<ArtistPackInfo> fetch_inventory_async(Cancellable? cancellable = null) throws Error {
             var results = new Gee.ArrayList<ArtistPackInfo>();
-            if (!is_executable_file(INVENTORY_HELPER)) return results;
+            if (!is_executable_file(inventory_helper())) return results;
 
             var proc = new Subprocess(SubprocessFlags.STDOUT_PIPE | SubprocessFlags.STDERR_PIPE,
-                                       INVENTORY_HELPER);
+                                       inventory_helper());
             string stdout_data;
             string stderr_data;
             yield proc.communicate_utf8_async(null, cancellable, out stdout_data, out stderr_data);
             if (!proc.get_successful()) {
                 throw new ArtistPackError.BACKEND_FAILED(
-                    "%s exited with an error: %s".printf(INVENTORY_HELPER, (stderr_data ?? "").strip()));
+                    "%s exited with an error: %s".printf(inventory_helper(), (stderr_data ?? "").strip()));
             }
             if (stdout_data == null || stdout_data.strip().length == 0) return results;
 
@@ -87,11 +106,11 @@ namespace Singularity {
                 parser.load_from_data(stdout_data);
             } catch (Error e) {
                 throw new ArtistPackError.INVALID_RESPONSE(
-                    "%s produced invalid JSON: %s".printf(INVENTORY_HELPER, e.message));
+                    "%s produced invalid JSON: %s".printf(inventory_helper(), e.message));
             }
             var root_node = parser.get_root();
             if (root_node == null || root_node.get_node_type() != Json.NodeType.ARRAY) {
-                throw new ArtistPackError.INVALID_RESPONSE("%s did not return a JSON array".printf(INVENTORY_HELPER));
+                throw new ArtistPackError.INVALID_RESPONSE("%s did not return a JSON array".printf(inventory_helper()));
             }
 
             var array = root_node.get_array();
@@ -121,8 +140,8 @@ namespace Singularity {
                 throw new ArtistPackError.INVALID_RESPONSE(
                     "Refusing to install %s: no source URI given".printf(package));
             }
-            if (!is_executable_file(INSTALL_HELPER)) {
-                throw new ArtistPackError.BACKEND_MISSING("%s is not installed".printf(INSTALL_HELPER));
+            if (!is_executable_file(install_helper())) {
+                throw new ArtistPackError.BACKEND_MISSING("%s is not installed".printf(install_helper()));
             }
             string? pkexec = find_pkexec();
             if (pkexec == null) {
@@ -130,7 +149,7 @@ namespace Singularity {
             }
 
             var proc = new Subprocess(SubprocessFlags.STDOUT_PIPE | SubprocessFlags.STDERR_PIPE,
-                                       pkexec, INSTALL_HELPER, package, source);
+                                       pkexec, install_helper(), package, source);
             string stdout_data;
             string stderr_data;
             yield proc.communicate_utf8_async(null, cancellable, out stdout_data, out stderr_data);

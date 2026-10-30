@@ -904,9 +904,9 @@ if get_option('power-helper')
 endif
 
 install_data('data/artist-packs/singularity-artist-pack-inventory',
-  install_dir: '/usr/local/bin', install_mode: 'rwxr-xr-x')
+  install_dir: get_option('bindir'), install_mode: 'rwxr-xr-x')
 install_data('data/artist-packs/singularity-artist-pack-install',
-  install_dir: '/usr/local/bin', install_mode: 'rwxr-xr-x')
+  install_dir: get_option('bindir'), install_mode: 'rwxr-xr-x')
 install_data('data/artist-packs/dev.sinty.desktop.artist-pack-install.policy',
   install_dir: get_option('datadir') / 'polkit-1' / 'actions')
 
